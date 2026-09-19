@@ -1423,110 +1423,74 @@ class Epub {
         return this.processEachXhtmlFileAsync(mutator);
     }
 
-    runScript(script, mode = "dom") {
-        if (mode === "raw") {
-            let mutator = new Function("context",
-                "with (context) {\n" + script + "\n}\n");
-            return this.processEachXhtmlFileRaw(mutator);
-        }
-
+    runScript(script) {
         let mutator = new Function("dom", "zipObjectName", script);
         return this.processEachXhtmlFile(mutator);
     }
 
-    runScriptAsync(script, mode = "dom") {
-        if (mode === "raw") {
-            const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-            let asyncMutator = new AsyncFunction("context",
-                "with (context) {\n" + script + "\n}\n");
-            return this.processEachXhtmlFileRawAsync(asyncMutator);
-        }
-
+    runScriptAsync(script) {
         const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
         let asyncMutator = new AsyncFunction("dom", "zipObjectName", script);
         return this.processEachXhtmlFileAsync(asyncMutator);
     }
 
-    /*
-     * Run a custom script against the original XHTML text.
-     *
-     * Raw scripts receive:
-     *   html          - the XHTML source text
-     *   zipObjectName - the EPUB path of the current XHTML file
-     *
-     * A script can modify `html` and return true when it changed the file.
-     * It can also return a string; that string is used as the new XHTML.
-     *
-     * Unlike the DOM path, the raw path does not use DOMParser or
-     * XMLSerializer, so unrelated XHTML formatting is preserved.
-     */
-    processEachXhtmlFileRaw(mutator) {
+    runRawScript(script) {
+        const that = this;
+        const rawMutator = new Function("initialHtml", "zipObjectName",
+            "let html = initialHtml;\n" +
+            "let result = (function() {\n" + script + "\n})();\n" +
+            "return {html: html, result: result};");
         let sequence = Promise.resolve();
-        let that = this;
-        Window.epubstate = null;
-
         for (let zipObjectName of this.opf.xhtmlNames()) {
-            sequence = sequence
-                .then(function () {
-                    let file = that.zip.file(zipObjectName);
-                    return file.async("text");
-                })
-                .then(function (html) {
-                    let context = {
-                        html: html,
-                        zipObjectName: zipObjectName
-                    };
-
-                    let result = mutator(context);
-
-                    if (typeof result === "string") {
-                        context.html = result;
-                        result = true;
+            sequence = sequence.then(() => {
+                const file = that.zip.file(zipObjectName);
+                if (!file) return;
+                return file.async("text").then(html => {
+                    const output = rawMutator(html, zipObjectName);
+                    let newHtml = output && typeof output.html === "string" ? output.html : html;
+                    let modified = output && output.result === true;
+                    if (typeof output?.result === "string") {
+                        newHtml = output.result;
+                        modified = newHtml !== html;
                     }
-
-                    if (result) {
-                        let file = that.zip.file(zipObjectName);
-                        let options = that.createZipOptions(file);
-                        return that.zip.file(zipObjectName, context.html, options);
+                    if (modified || newHtml !== html) {
+                        const options = that.createZipOptions(file);
+                        that.zip.file(zipObjectName, newHtml, options);
+                        that.zipObjects.set(zipObjectName, that.zip.file(zipObjectName));
                     }
                 });
+            });
         }
-
         return sequence;
     }
 
-    processEachXhtmlFileRawAsync(asyncMutator) {
+    runRawScriptAsync(script) {
+        const that = this;
+        const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+        const rawMutator = new AsyncFunction("initialHtml", "zipObjectName",
+            "let html = initialHtml;\n" +
+            "let result = await (async function() {\n" + script + "\n})();\n" +
+            "return {html: html, result: result};");
         let sequence = Promise.resolve();
-        let that = this;
-        Window.epubstate = null;
-
         for (let zipObjectName of this.opf.xhtmlNames()) {
-            sequence = sequence
-                .then(function () {
-                    let file = that.zip.file(zipObjectName);
-                    return file.async("text");
-                })
-                .then(async function (html) {
-                    let context = {
-                        html: html,
-                        zipObjectName: zipObjectName
-                    };
-
-                    let result = await asyncMutator(context);
-
-                    if (typeof result === "string") {
-                        context.html = result;
-                        result = true;
+            sequence = sequence.then(() => {
+                const file = that.zip.file(zipObjectName);
+                if (!file) return;
+                return file.async("text").then(html => rawMutator(html, zipObjectName).then(output => {
+                    let newHtml = output && typeof output.html === "string" ? output.html : html;
+                    let modified = output && output.result === true;
+                    if (typeof output?.result === "string") {
+                        newHtml = output.result;
+                        modified = newHtml !== html;
                     }
-
-                    if (result) {
-                        let file = that.zip.file(zipObjectName);
-                        let options = that.createZipOptions(file);
-                        return that.zip.file(zipObjectName, context.html, options);
+                    if (modified || newHtml !== html) {
+                        const options = that.createZipOptions(file);
+                        that.zip.file(zipObjectName, newHtml, options);
+                        that.zipObjects.set(zipObjectName, that.zip.file(zipObjectName));
                     }
-                });
+                }));
+            });
         }
-
         return sequence;
     }
 
