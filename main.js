@@ -120,15 +120,17 @@ class Main {
 
     runScript() {
         let script = document.getElementById("mutatorScriptInput").value;
+        let mode = document.getElementById("scriptModeInput").value;
         let epub = this.epub;
-        return epub.runScript(script)
+        return epub.runScript(script, mode)
             .then(() => epub.save(this.fileName, "application/epub+zip"));
     }
 
     runScriptAsync() {
         let script = document.getElementById("mutatorScriptInput").value;
+        let mode = document.getElementById("scriptModeInput").value;
         let epub = this.epub;
-        return epub.runScriptAsync(script)
+        return epub.runScriptAsync(script, mode)
             .then(() => epub.save(this.fileName, "application/epub+zip"));
     }
 

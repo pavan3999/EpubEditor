@@ -39,6 +39,15 @@ return changed;
             <td><button id="runScriptButton">Run script above to modify Epub</button></td>
         </tr>
         <tr>
+            <td>Script mode</td>
+            <td>
+                <select id="scriptModeInput">
+                    <option value="dom">DOM (existing)</option>
+                    <option value="raw">Raw XHTML (preserve original markup)</option>
+                </select>
+            </td>
+        </tr>
+        <tr>
             <td></td>
             <td><button id="runScriptAsyncButton">Run async script</button></td>
         </tr>

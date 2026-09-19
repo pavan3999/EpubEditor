@@ -1423,15 +1423,111 @@ class Epub {
         return this.processEachXhtmlFileAsync(mutator);
     }
 
-    runScript(script) {
+    runScript(script, mode = "dom") {
+        if (mode === "raw") {
+            let mutator = new Function("context",
+                "with (context) {\n" + script + "\n}\n");
+            return this.processEachXhtmlFileRaw(mutator);
+        }
+
         let mutator = new Function("dom", "zipObjectName", script);
         return this.processEachXhtmlFile(mutator);
     }
 
-    runScriptAsync(script) {
+    runScriptAsync(script, mode = "dom") {
+        if (mode === "raw") {
+            const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+            let asyncMutator = new AsyncFunction("context",
+                "with (context) {\n" + script + "\n}\n");
+            return this.processEachXhtmlFileRawAsync(asyncMutator);
+        }
+
         const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
         let asyncMutator = new AsyncFunction("dom", "zipObjectName", script);
         return this.processEachXhtmlFileAsync(asyncMutator);
+    }
+
+    /*
+     * Run a custom script against the original XHTML text.
+     *
+     * Raw scripts receive:
+     *   html          - the XHTML source text
+     *   zipObjectName - the EPUB path of the current XHTML file
+     *
+     * A script can modify `html` and return true when it changed the file.
+     * It can also return a string; that string is used as the new XHTML.
+     *
+     * Unlike the DOM path, the raw path does not use DOMParser or
+     * XMLSerializer, so unrelated XHTML formatting is preserved.
+     */
+    processEachXhtmlFileRaw(mutator) {
+        let sequence = Promise.resolve();
+        let that = this;
+        Window.epubstate = null;
+
+        for (let zipObjectName of this.opf.xhtmlNames()) {
+            sequence = sequence
+                .then(function () {
+                    let file = that.zip.file(zipObjectName);
+                    return file.async("text");
+                })
+                .then(function (html) {
+                    let context = {
+                        html: html,
+                        zipObjectName: zipObjectName
+                    };
+
+                    let result = mutator(context);
+
+                    if (typeof result === "string") {
+                        context.html = result;
+                        result = true;
+                    }
+
+                    if (result) {
+                        let file = that.zip.file(zipObjectName);
+                        let options = that.createZipOptions(file);
+                        return that.zip.file(zipObjectName, context.html, options);
+                    }
+                });
+        }
+
+        return sequence;
+    }
+
+    processEachXhtmlFileRawAsync(asyncMutator) {
+        let sequence = Promise.resolve();
+        let that = this;
+        Window.epubstate = null;
+
+        for (let zipObjectName of this.opf.xhtmlNames()) {
+            sequence = sequence
+                .then(function () {
+                    let file = that.zip.file(zipObjectName);
+                    return file.async("text");
+                })
+                .then(async function (html) {
+                    let context = {
+                        html: html,
+                        zipObjectName: zipObjectName
+                    };
+
+                    let result = await asyncMutator(context);
+
+                    if (typeof result === "string") {
+                        context.html = result;
+                        result = true;
+                    }
+
+                    if (result) {
+                        let file = that.zip.file(zipObjectName);
+                        let options = that.createZipOptions(file);
+                        return that.zip.file(zipObjectName, context.html, options);
+                    }
+                });
+        }
+
+        return sequence;
     }
 
     sanitizeXhtml() {
