@@ -9,6 +9,16 @@
         width:  200px;
         height: 100px;
         }
+
+        #resourceManager { margin-top: 20px; padding: 12px; border: 1px solid #888; }
+        #resourceManager textarea { width: 100%; box-sizing: border-box; font-family: monospace; }
+        .resource-row { display: flex; gap: 6px; margin: 5px 0; align-items: center; }
+        .resource-row input { flex: 1; min-width: 0; }
+        .resource-file-row { flex-wrap: wrap; }
+        .resource-path { flex: 2 1 320px; overflow-wrap: anywhere; }
+        .font-family-input, [data-font-weight], [data-font-style] { min-width: 120px; }
+        .resource-list { margin: 6px 0 12px; }
+        .resource-help { font-size: 0.9em; opacity: 0.8; }
     </style>
 </head>
 <body>
@@ -21,8 +31,15 @@
                 </div>
                 <input type="file" id="fileNameInput" />
             </td>
-            <td><textarea id="mutatorScriptInput" rows="7" cols="70">// example: remove "chapter" from title of each chapter
-// dom is the dom for each chapter
+            <td>
+                <label for="scriptModeSelect"><strong>Script Mode:</strong></label>
+                <select id="scriptModeSelect">
+                    <option value="dom">DOM (existing)</option>
+                    <option value="raw">Raw XHTML (preserve original markup)</option>
+                </select>
+                <div id="scriptModeHelp" class="resource-help">DOM mode parses each XHTML file and serializes it again when modified.</div>
+                <textarea id="mutatorScriptInput" rows="10" cols="70">// DOM mode example: remove "chapter" from title of each chapter
+// dom is the DOM for each chapter
 // return true if chapter modified, false if not changed
 let title = dom.querySelector("h1");
 let changed = (title != null);
@@ -30,22 +47,14 @@ if (changed) {
     title.textContent = title.textContent.replace("Chapter", "");
 }
 return changed;
-            </textarea></td>
+                </textarea>
+            </td>
         </tr>
     </table>
     <table id="controls" hidden="true">
         <tr>
             <td></td>
             <td><button id="runScriptButton">Run script above to modify Epub</button></td>
-        </tr>
-        <tr>
-            <td>Script mode</td>
-            <td>
-                <select id="scriptModeInput">
-                    <option value="dom">DOM (existing)</option>
-                    <option value="raw">Raw XHTML (preserve original markup)</option>
-                </select>
-            </td>
         </tr>
         <tr>
             <td></td>
