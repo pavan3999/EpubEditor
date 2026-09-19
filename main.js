@@ -120,17 +120,19 @@ class Main {
 
     runScript() {
         let script = document.getElementById("mutatorScriptInput").value;
-        let mode = document.getElementById("scriptModeInput").value;
+        let mode = document.getElementById("scriptModeSelect").value;
         let epub = this.epub;
-        return epub.runScript(script, mode)
+        let operation = mode === "raw" ? epub.runRawScript(script) : epub.runScript(script);
+        return operation
             .then(() => epub.save(this.fileName, "application/epub+zip"));
     }
 
     runScriptAsync() {
         let script = document.getElementById("mutatorScriptInput").value;
-        let mode = document.getElementById("scriptModeInput").value;
+        let mode = document.getElementById("scriptModeSelect").value;
         let epub = this.epub;
-        return epub.runScriptAsync(script, mode)
+        let operation = mode === "raw" ? epub.runRawScriptAsync(script) : epub.runScriptAsync(script);
+        return operation
             .then(() => epub.save(this.fileName, "application/epub+zip"));
     }
 
@@ -241,6 +243,36 @@ class Main {
         document.getElementById("updateDateButton").onclick = this.updateDate.bind(this);
         document.getElementById("runScriptButton").onclick = this.runScript.bind(this);
         document.getElementById("runScriptAsyncButton").onclick = this.runScriptAsync.bind(this);
+
+        const scriptMode = document.getElementById("scriptModeSelect");
+        const scriptInput = document.getElementById("mutatorScriptInput");
+        const domExample = scriptInput.value;
+        const rawExample = `// Raw XHTML mode: html is the original XHTML string for each chapter
+// zipObjectName is the EPUB path of the current chapter
+// Return true to save the current html, false to leave it unchanged.
+// You can directly reassign html and the original markup is preserved.
+let newHtml = html.replace(
+    /<h2\\b[^>]*class=["'][^"']*\\bchapter-title\\b[^"']*["'][^>]*>[\\s\\S]*?<\\/h2>/gi,
+    ""
+);
+if (newHtml !== html) {
+    html = newHtml;
+    return true;
+}
+return false;`;
+        const scriptHelp = document.getElementById("scriptModeHelp");
+        const updateScriptMode = () => {
+            if (scriptMode.value === "raw") {
+                scriptHelp.textContent = "Raw mode works on the original XHTML text and does not use XMLSerializer. Unrelated whitespace/formatting is preserved.";
+                if (scriptInput.value === domExample) scriptInput.value = rawExample;
+            } else {
+                scriptHelp.textContent = "DOM mode parses each XHTML file and serializes it again when modified.";
+                if (scriptInput.value === rawExample) scriptInput.value = domExample;
+            }
+        };
+        scriptMode.onchange = updateScriptMode;
+
+        if (window.initResourceManager) window.initResourceManager(this);
 
         const fileNameInput = document.getElementById('fileNameInput');
         fileNameInput.addEventListener("change", () => this.onFileNameInputChange(fileNameInput), false);
