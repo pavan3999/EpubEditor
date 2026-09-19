@@ -5,7 +5,7 @@ Tool I hacked up to clean-up epubs made by WebToEpub
 This is very much a work in progress, and not really my best work.
 
 ## How to use (really easy way)
-* Go to https://dteviot.github.io/EpubEditor/
+* Go to https://pavan3999.github.io/EpubEditor/
 * Drag and drop epub onto the drop zone. Or click the "Choose File" button and select file on dialog that pops up.
 * Click the button for the function you want. e.g.
   *  Click "Check for Zero Size Images" button to see if WebToEpub inserted "empty" images when it was unable to fetch the wanted image from the Internet.
@@ -19,13 +19,13 @@ This is very much a work in progress, and not really my best work.
 
 ## How to run a script
 https://github.com/dteviot/WebToEpub/issues/2173#issuecomment-3296153047
-* Go to https://dteviot.github.io/EpubEditor/
+* Go to https://pavan3999.github.io/EpubEditor/
 * Drag and drop epub onto the drop zone. (The box on the LEFT.) Or click the "Choose File" button and select file on dialog that pops up.
 * Replace the text in the box on the RIGHT with your script.
 * Click option "Run script above to modify Epub".
 * When it finishes, save result.
 
-Note: a collection of existing scripts can be found at: https://github.com/dteviot/EpubEditor/tree/master/mutators
+Note: a collection of existing scripts can be found at: https://github.com/pavan3999/EpubEditor/tree/master/mutators
 
 ## How to write script to unscramble ChrysanthemumGarden
 https://github.com/dteviot/WebToEpub/issues/2173#issuecomment-3296153047
