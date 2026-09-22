@@ -251,15 +251,29 @@ class Main {
 // zipObjectName is the EPUB path of the current chapter
 // Return true to save the current html, false to leave it unchanged.
 // You can directly reassign html and the original markup is preserved.
-let newHtml = html.replace(
-    /<h2\\b[^>]*class=["'][^"']*\\bchapter-title\\b[^"']*["'][^>]*>[\\s\\S]*?<\\/h2>/gi,
-    ""
-);
-if (newHtml !== html) {
-    html = newHtml;
-    return true;
-}
-return false;`;
+const chapterTitle =
+    /^\s*(?:chapter|ch\.?)\s*(?:\d+|[IVXLCDM]+)\s*(?:[:.\-–—]\s*.*)?\s*$/i;
+
+const tagRegex = /<(p|h2|h3|h4|h5|h6)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+
+const original = html;
+
+html = html.replace(tagRegex, match => {
+    // Remove XHTML tags to get the actual text
+    const text = match
+        .replace(/<[^>]*>/g, "")
+        .replace(/&nbsp;/gi, " ")
+        .replace(/&amp;/gi, "&")
+        .replace(/&lt;/gi, "<")
+        .replace(/&gt;/gi, ">")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    // Remove the entire element if it is a chapter title
+    return chapterTitle.test(text) ? "" : match;
+});
+
+return html !== original;
         const scriptHelp = document.getElementById("scriptModeHelp");
         const updateScriptMode = () => {
             if (scriptMode.value === "raw") {
