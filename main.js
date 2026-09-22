@@ -273,7 +273,7 @@ html = html.replace(tagRegex, match => {
     return chapterTitle.test(text) ? "" : match;
 });
 
-return html !== original;
+return html !== original;`;
         const scriptHelp = document.getElementById("scriptModeHelp");
         const updateScriptMode = () => {
             if (scriptMode.value === "raw") {
