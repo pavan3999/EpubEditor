@@ -247,7 +247,7 @@ class Main {
         const scriptMode = document.getElementById("scriptModeSelect");
         const scriptInput = document.getElementById("mutatorScriptInput");
         const domExample = scriptInput.value;
-        const rawExample = `// Raw XHTML mode: html is the original XHTML string for each chapter
+        const rawExample = String.raw`// Raw XHTML mode: html is the original XHTML string for each chapter
 // zipObjectName is the EPUB path of the current chapter
 // Return true to save the current html, false to leave it unchanged.
 // You can directly reassign html and the original markup is preserved.
