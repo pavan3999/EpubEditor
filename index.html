@@ -122,7 +122,16 @@ return changed;
         </tr>
         <tr>
             <td></td>
-            <td><button id="updateTocTitlesFromHeadingButton">Update TOC Titles from Chapter Heading (H1-H6)</button></td>
+            <td><select id="updateTocHeadingLevel" aria-label="TOC heading level">
+                <option value="auto">Automatic (H1 → H6)</option>
+                <option value="h1">H1 only</option>
+                <option value="h2">H2 only</option>
+                <option value="h3">H3 only</option>
+                <option value="h4">H4 only</option>
+                <option value="h5">H5 only</option>
+                <option value="h6">H6 only</option>
+            </select>
+            <button id="updateTocTitlesFromHeadingButton">Update TOC Titles from Chapter Heading</button></td>
         </tr>
     </table>
     <div id="outputTarget">

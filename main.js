@@ -163,7 +163,8 @@ class Main {
 
     updateTocTitlesFromHeading() {
         let epub = this.epub;
-        return epub.updateTocTitlesFromHeading()
+        const headingMode = document.getElementById("updateTocHeadingLevel").value;
+        return epub.updateTocTitlesFromHeading(headingMode)
             .then(updated => {
                 document.getElementById("listHeader").textContent =
                     "Updated " + updated + " TOC entries from chapter headings (H1-H6)";
