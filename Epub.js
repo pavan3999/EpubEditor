@@ -1672,7 +1672,7 @@ class Epub {
 
 
 
-    async updateTocTitlesFromH1() {
+    async updateTocTitlesFromHeading() {
         const normalize = (path) => {
             const out = [];
             for (const part of path.split("/")) {
@@ -1700,9 +1700,9 @@ class Epub {
             if (!file) continue;
             const dom = new DOMParser().parseFromString(
                 await file.async("text"), "text/html");
-            const h1 = dom.querySelector("h1");
-            if (h1) {
-                const title = h1.textContent.replace(/\s+/g, " ").trim();
+            const heading = dom.querySelector("h1, h2, h3, h4, h5, h6");
+            if (heading) {
+                const title = heading.textContent.replace(/\s+/g, " ").trim();
                 if (title) titles.set(name, title);
             }
         }

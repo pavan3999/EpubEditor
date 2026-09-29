@@ -161,12 +161,12 @@ class Main {
     }
 
 
-    updateTocTitlesFromH1() {
+    updateTocTitlesFromHeading() {
         let epub = this.epub;
-        return epub.updateTocTitlesFromH1()
+        return epub.updateTocTitlesFromHeading()
             .then(updated => {
                 document.getElementById("listHeader").textContent =
-                    "Updated " + updated + " TOC entries from chapter H1 titles";
+                    "Updated " + updated + " TOC entries from chapter headings (H1-H6)";
                 return epub.save(this.fileName, "application/epub+zip");
             });
     }
@@ -252,7 +252,7 @@ class Main {
         document.getElementById("appendSourceLinkInEachChapterButton").onclick = this.appendSourceLinkInEachChapter.bind(this);
         document.getElementById("linkExtraFontsButton").onclick = this.linkExtraFonts.bind(this);
         document.getElementById("updateDateButton").onclick = this.updateDate.bind(this);
-        document.getElementById("updateTocTitlesFromH1Button").onclick = this.updateTocTitlesFromH1.bind(this);
+        document.getElementById("updateTocTitlesFromHeadingButton").onclick = this.updateTocTitlesFromHeading.bind(this);
         document.getElementById("runScriptButton").onclick = this.runScript.bind(this);
         document.getElementById("runScriptAsyncButton").onclick = this.runScriptAsync.bind(this);
 
