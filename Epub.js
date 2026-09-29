@@ -1671,6 +1671,93 @@ class Epub {
     }
 
 
+
+    async updateTocTitlesFromH1() {
+        const normalize = (path) => {
+            const out = [];
+            for (const part of path.split("/")) {
+                if (!part || part === ".") continue;
+                if (part === "..") { if (out.length) out.pop(); }
+                else out.push(part);
+            }
+            return out.join("/");
+        };
+        const resolve = (ref, baseFile) => {
+            if (!ref) return null;
+            ref = ref.split("#")[0].split("?")[0];
+            const base = baseFile.split("/");
+            base.pop();
+            return normalize(base.concat(ref.split("/")).join("/"));
+        };
+        const esc = (s) => String(s)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+            .replace(/'/g, "&apos;");
+
+        const titles = new Map();
+        for (const name of this.opf.xhtmlNames()) {
+            const file = this.zipObjects.get(name);
+            if (!file) continue;
+            const dom = new DOMParser().parseFromString(
+                await file.async("text"), "text/html");
+            const h1 = dom.querySelector("h1");
+            if (h1) {
+                const title = h1.textContent.replace(/\s+/g, " ").trim();
+                if (title) titles.set(name, title);
+            }
+        }
+
+        const updateFile = async (name, kind) => {
+            const file = this.zipObjects.get(name);
+            if (!file) return 0;
+            let text = await file.async("text");
+            let count = 0;
+
+            if (kind === "ncx") {
+                const re = /(<navPoint\b[^>]*>[\s\S]*?<navLabel\b[^>]*>\s*<text\b[^>]*>)[\s\S]*?(<\/text>\s*<\/navLabel>[\s\S]*?<content\b[^>]*\bsrc\s*=\s*["']([^"']+)["'])/gi;
+                text = text.replace(re, (m, a, b, src) => {
+                    const title = titles.get(resolve(src, name));
+                    if (!title) return m;
+                    count++;
+                    return a + esc(title) + b;
+                });
+            } else {
+                const re = /(<a\b[^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*>)[\s\S]*?(<\/a>)/gi;
+                text = text.replace(re, (m, a, href, b) => {
+                    const title = titles.get(resolve(href, name));
+                    if (!title) return m;
+                    count++;
+                    return a + esc(title) + b;
+                });
+            }
+
+            if (count) this.zip.file(name, text, this.createZipOptions(file));
+            return count;
+        };
+
+        let updated = 0;
+        for (const name of this.zipObjects.keys()) {
+            if (name.toLowerCase().endsWith("/toc.ncx") || name.toLowerCase() === "toc.ncx")
+                updated += await updateFile(name, "ncx");
+        }
+
+        const navs = [];
+        for (const item of this.opf.items.values()) {
+            const props = (item.getAttribute("properties") || "").split(/\s+/);
+            if (props.includes("nav")) navs.push(this.opf.zipNameForItem(item));
+        }
+        for (const name of navs) updated += await updateFile(name, "toc");
+
+        for (const name of this.opf.xhtmlNames()) {
+            const file = this.zipObjects.get(name);
+            if (!file) continue;
+            const text = await file.async("text");
+            if (text.includes("webToEpub-information-toc"))
+                updated += await updateFile(name, "toc");
+        }
+        return updated;
+    }
+
     updateDate(dateString) {
         let dateEl = this.opf.dom.querySelector("dc\\:date:not([opf\\:event])");
         if (dateEl !== null) {
