@@ -20,6 +20,52 @@
         .resource-list { margin: 6px 0 12px; }
         .resource-help { font-size: 0.9em; opacity: 0.8; }
     </style>
+
+    <style id="mergeEpubStyles">
+        .merge-epub-panel { max-width: 760px; margin: 8px 0; }
+        .merge-epub-toolbar, .merge-epub-actions {
+            display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:6px 0;
+        }
+        .merge-file-picker { display:inline-flex; cursor:pointer; }
+        .merge-file-picker input { position:absolute; width:1px; height:1px; opacity:0; }
+        .merge-file-picker span {
+            display:inline-block; padding:6px 10px; border:1px solid currentColor;
+            border-radius:4px; cursor:pointer;
+        }
+        .merge-order-help { margin:8px 0; font-size:.9em; opacity:.8; }
+        .merge-epub-order {
+            margin:8px 0; padding:0; list-style:none; border:1px solid #888;
+            border-radius:5px; min-height:46px;
+        }
+        .merge-epub-item {
+            display:flex; align-items:center; gap:7px; padding:7px;
+            border-bottom:1px solid #888; user-select:none; touch-action:none;
+        }
+        .merge-epub-item:last-child { border-bottom:0; }
+        .merge-epub-item.dragging { opacity:.45; }
+        .merge-epub-item.drop-target { outline:2px dashed currentColor; outline-offset:-2px; }
+        .merge-drag-handle {
+            cursor:grab; font-size:1.15em; padding:5px; min-width:28px; text-align:center;
+        }
+        .merge-epub-number { min-width:2em; text-align:center; font-weight:bold; }
+        .merge-epub-name { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+        .merge-epub-size { opacity:.65; white-space:nowrap; font-size:.85em; }
+        .merge-row-buttons { display:flex; gap:3px; flex-wrap:nowrap; }
+        .merge-row-buttons button { min-width:34px; min-height:34px; padding:4px 7px; }
+        .merge-empty-message {
+            padding:10px; text-align:center; opacity:.65;
+            border:1px dashed #888; border-radius:5px;
+        }
+        .merge-duplicate-warning {
+            margin:6px 0; padding:7px; border:1px solid currentColor; border-radius:4px;
+        }
+        .merge-epub-status { margin-top:8px; min-height:1.3em; }
+        .merge-base-label {
+            font-size:.75em; padding:2px 5px; border:1px solid currentColor;
+            border-radius:3px; white-space:nowrap;
+        }
+    </style>
+
 </head>
 <body>
     <h1>Epub Editor</h1>
@@ -56,15 +102,41 @@ return changed;
             <td></td>
             <td><button id="runScriptButton">Run script above to modify Epub</button></td>
         </tr>
+
         <tr>
             <td>Merge EPUBs</td>
             <td>
-                <input id="mergeEpubFiles" type="file"
-                       accept=".epub,application/epub+zip" multiple>
-                <button id="mergeEpubButton">Merge Selected EPUBs</button>
+                <div id="mergeEpubPanel" class="merge-epub-panel">
+                    <div class="merge-epub-toolbar">
+                        <label class="merge-file-picker">
+                            <input id="mergeEpubFiles" type="file"
+                                   accept=".epub,application/epub+zip" multiple>
+                            <span>Add EPUBs</span>
+                        </label>
+                        <button id="mergeClearButton" type="button">Clear all</button>
+                        <span id="mergeEpubCount">0 EPUBs</span>
+                    </div>
+                    <div id="mergeDuplicateWarning" class="merge-duplicate-warning" hidden></div>
+                    <div class="merge-order-help">
+                        Merge order is top → bottom. Drag the ☷ handle, or use ↑ / ↓.
+                        The first EPUB is the BASE EPUB.
+                    </div>
+                    <ol id="mergeEpubOrder" class="merge-epub-order"
+                        aria-label="EPUB merge order"></ol>
+                    <div id="mergeEmptyMessage" class="merge-empty-message">
+                        Select EPUB files to build the merge order.
+                    </div>
+                    <div class="merge-epub-actions">
+                        <button id="mergeEpubButton" type="button" disabled>
+                            Merge Selected EPUBs
+                        </button>
+                    </div>
+                    <div id="mergeEpubStatus" class="merge-epub-status"
+                         aria-live="polite"></div>
+                </div>
             </td>
         </tr>
-        <tr>
+<tr>
             <td></td>
             <td><button id="runScriptAsyncButton">Run async script</button></td>
         </tr>

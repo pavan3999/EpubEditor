@@ -75,23 +75,22 @@ class Main {
         document.getElementById("controls").hidden = false;
     }
 
+
     mergeSelectedEpubs() {
-        const input = document.getElementById("mergeEpubFiles");
-        const files = Array.from(input.files || []);
+        const files = this.mergeEpubFilesOrder || [];
 
         if (files.length < 2) {
-            window.alert(
-                "Select at least two EPUB files. " +
-                "The first selected EPUB is the base; " +
-                "the rest are appended."
-            );
+            window.alert("Add at least two EPUB files to the merge order.");
             return;
         }
 
         const button = document.getElementById("mergeEpubButton");
+        const status = document.getElementById("mergeEpubStatus");
         button.disabled = true;
-        document.getElementById("listHeader").textContent =
-            "Merging EPUBs...";
+
+        if (status) {
+            status.textContent = "Merging " + files.length + " EPUBs...";
+        }
 
         return EpubMerger.merge(files)
             .then(result => {
@@ -110,19 +109,267 @@ class Main {
                     60000
                 );
 
+                if (status) {
+                    status.textContent =
+                        "Merged " + files.length +
+                        " EPUBs (" + result.chapterCount +
+                        " spine entries). Download started.";
+                }
+
                 document.getElementById("listHeader").textContent =
                     "Merged " + files.length +
                     " EPUBs (" + result.chapterCount +
                     " spine entries).";
             })
-            .catch(e =>
+            .catch(e => {
+                if (status) {
+                    status.textContent =
+                        "Merge failed: " + (e && e.message ? e.message : e);
+                }
                 window.alert(
-                    "Failed to merge EPUBs: " + e
-                )
-            )
+                    "Failed to merge EPUBs: " +
+                    (e && e.message ? e.message : e)
+                );
+            })
             .finally(() => {
-                button.disabled = false;
+                button.disabled = this.mergeEpubFilesOrder.length < 2;
             });
+    }
+
+    addMergeEpubFiles(fileList) {
+        const incoming = Array.from(fileList || []);
+
+        for (const file of incoming) {
+            if (!/\.epub$/i.test(file.name)) {
+                continue;
+            }
+
+            const duplicate = this.mergeEpubFilesOrder.some(existing =>
+                existing.name === file.name &&
+                existing.size === file.size &&
+                existing.lastModified === file.lastModified
+            );
+
+            if (!duplicate) {
+                this.mergeEpubFilesOrder.push(file);
+            }
+        }
+
+        this.renderMergeEpubOrder();
+    }
+
+    removeMergeEpub(index) {
+        this.mergeEpubFilesOrder.splice(index, 1);
+        this.renderMergeEpubOrder();
+    }
+
+    moveMergeEpub(index, direction) {
+        const target = index + direction;
+
+        if (
+            target < 0 ||
+            target >= this.mergeEpubFilesOrder.length
+        ) {
+            return;
+        }
+
+        const files = this.mergeEpubFilesOrder;
+        const temp = files[index];
+        files[index] = files[target];
+        files[target] = temp;
+
+        this.renderMergeEpubOrder();
+    }
+
+    clearMergeEpubs() {
+        this.mergeEpubFilesOrder = [];
+        this.renderMergeEpubOrder();
+
+        const input = document.getElementById("mergeEpubFiles");
+        if (input) {
+            input.value = "";
+        }
+    }
+
+    renderMergeEpubOrder() {
+        const list = document.getElementById("mergeEpubOrder");
+        const empty = document.getElementById("mergeEmptyMessage");
+        const count = document.getElementById("mergeEpubCount");
+        const warning = document.getElementById("mergeDuplicateWarning");
+        const button = document.getElementById("mergeEpubButton");
+
+        if (!list) {
+            return;
+        }
+
+        const files = this.mergeEpubFilesOrder || [];
+        list.textContent = "";
+
+        files.forEach((file, index) => {
+            const item = document.createElement("li");
+            item.className = "merge-epub-item";
+            item.draggable = true;
+            item.dataset.index = String(index);
+
+            item.addEventListener("dragstart", event => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", String(index));
+                item.classList.add("merge-dragging");
+            });
+
+            item.addEventListener("dragend", () => {
+                item.classList.remove("merge-dragging");
+            });
+
+            item.addEventListener("dragover", event => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                item.classList.add("merge-drag-over");
+            });
+
+            item.addEventListener("dragleave", () => {
+                item.classList.remove("merge-drag-over");
+            });
+
+            item.addEventListener("drop", event => {
+                event.preventDefault();
+                item.classList.remove("merge-drag-over");
+
+                const from = Number(
+                    event.dataTransfer.getData("text/plain")
+                );
+                const to = index;
+
+                if (
+                    Number.isInteger(from) &&
+                    from !== to &&
+                    from >= 0 &&
+                    from < files.length
+                ) {
+                    const moved = files.splice(from, 1)[0];
+                    files.splice(to, 0, moved);
+                    this.renderMergeEpubOrder();
+                }
+            });
+
+            const handle = document.createElement("span");
+            handle.className = "merge-drag-handle";
+            handle.textContent = "☷";
+            handle.title = "Drag to reorder";
+            handle.setAttribute("aria-hidden", "true");
+
+            const number = document.createElement("span");
+            number.className = "merge-order-number";
+            number.textContent = String(index + 1) + ".";
+
+            const info = document.createElement("span");
+            info.className = "merge-file-info";
+
+            const name = document.createElement("strong");
+            name.textContent = file.name;
+
+            const meta = document.createElement("small");
+            meta.textContent = this.formatMergeFileSize(file.size);
+
+            info.appendChild(name);
+            info.appendChild(meta);
+
+            if (index === 0) {
+                const base = document.createElement("span");
+                base.className = "merge-base-badge";
+                base.textContent = "BASE";
+                info.appendChild(base);
+            }
+
+            const actions = document.createElement("span");
+            actions.className = "merge-item-actions";
+
+            const up = document.createElement("button");
+            up.type = "button";
+            up.textContent = "↑";
+            up.title = "Move up";
+            up.disabled = index === 0;
+            up.onclick = () => this.moveMergeEpub(index, -1);
+
+            const down = document.createElement("button");
+            down.type = "button";
+            down.textContent = "↓";
+            down.title = "Move down";
+            down.disabled = index === files.length - 1;
+            down.onclick = () => this.moveMergeEpub(index, 1);
+
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.textContent = "×";
+            remove.title = "Remove EPUB";
+            remove.onclick = () => this.removeMergeEpub(index);
+
+            actions.appendChild(up);
+            actions.appendChild(down);
+            actions.appendChild(remove);
+
+            item.appendChild(handle);
+            item.appendChild(number);
+            item.appendChild(info);
+            item.appendChild(actions);
+            list.appendChild(item);
+        });
+
+        if (count) {
+            count.textContent =
+                files.length + " EPUB" +
+                (files.length === 1 ? "" : "s");
+        }
+
+        if (empty) {
+            empty.hidden = files.length !== 0;
+        }
+
+        if (button) {
+            button.disabled = files.length < 2;
+        }
+
+        if (warning) {
+            const names = new Map();
+
+            files.forEach(file => {
+                const key = file.name.toLowerCase();
+                names.set(key, (names.get(key) || 0) + 1);
+            });
+
+            const duplicates = Array.from(names.entries())
+                .filter(([, copies]) => copies > 1)
+                .map(([name, copies]) =>
+                    name + " (" + copies + " copies)"
+                );
+
+            warning.hidden = duplicates.length === 0;
+            warning.textContent = duplicates.length
+                ? "Duplicate filename(s): " +
+                  duplicates.join(", ") +
+                  ". They are kept as separate EPUBs."
+                : "";
+        }
+    }
+
+    formatMergeFileSize(bytes) {
+        if (!Number.isFinite(bytes)) {
+            return "";
+        }
+
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+
+        if (bytes < 1024 * 1024) {
+            return (bytes / 1024).toFixed(1) + " KB";
+        }
+
+        if (bytes < 1024 * 1024 * 1024) {
+            return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        }
+
+        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
     }
 
 
@@ -305,7 +552,24 @@ class Main {
         document.getElementById("linkExtraFontsButton").onclick = this.linkExtraFonts.bind(this);
         document.getElementById("updateDateButton").onclick = this.updateDate.bind(this);
         document.getElementById("updateTocTitlesFromHeadingButton").onclick = this.updateTocTitlesFromHeading.bind(this);
-        document.getElementById("mergeEpubButton").onclick = this.mergeSelectedEpubs.bind(this);
+        this.mergeEpubFilesOrder = [];
+
+        document.getElementById("mergeEpubFiles").addEventListener(
+            "change",
+            event => {
+                this.addMergeEpubFiles(event.target.files);
+                event.target.value = "";
+            }
+        );
+
+        document.getElementById("mergeClearButton").onclick =
+            this.clearMergeEpubs.bind(this);
+
+        document.getElementById("mergeEpubButton").onclick =
+            this.mergeSelectedEpubs.bind(this);
+
+        this.renderMergeEpubOrder();
+
         document.getElementById("runScriptButton").onclick = this.runScript.bind(this);
         document.getElementById("runScriptAsyncButton").onclick = this.runScriptAsync.bind(this);
 
