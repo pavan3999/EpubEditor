@@ -97,16 +97,10 @@ return changed;
             </td>
         </tr>
     </table>
-    <table id="controls" hidden="true">
-        <tr>
-            <td></td>
-            <td><button id="runScriptButton">Run script above to modify Epub</button></td>
-        </tr>
 
-        <tr>
-            <td>Merge EPUBs</td>
-            <td>
-                <div id="mergeEpubPanel" class="merge-epub-panel">
+<div id="mergeEpubSection">
+    <h2>Merge EPUBs</h2>
+    <div id="mergeEpubPanel" class="merge-epub-panel">
                     <div class="merge-epub-toolbar">
                         <label class="merge-file-picker">
                             <input id="mergeEpubFiles" type="file"
@@ -134,8 +128,15 @@ return changed;
                     <div id="mergeEpubStatus" class="merge-epub-status"
                          aria-live="polite"></div>
                 </div>
-            </td>
+</div>
+
+    <table id="controls" hidden="true">
+        <tr>
+            <td></td>
+            <td><button id="runScriptButton">Run script above to modify Epub</button></td>
         </tr>
+
+
 <tr>
             <td></td>
             <td><button id="runScriptAsyncButton">Run async script</button></td>
