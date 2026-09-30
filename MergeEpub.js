@@ -3,8 +3,8 @@
  * First selected EPUB = base.
  * Remaining EPUBs = appended in order.
  *
- * Appended EPUB content is copied below Merge_NNN/, so relative links
- * between its XHTML/CSS/images/fonts remain valid.
+ * Every input EPUB is stored in its own numbered volume directory:
+ * 1/, 2/, 3/, ... so relative links inside each volume remain valid.
  */
 "use strict";
 
@@ -21,44 +21,69 @@ class EpubMerger {
 
         const base = epubs[0];
         const baseInfo = await this.readEpubInfo(base);
-        let mergeIndex = 1;
 
+        /*
+         * Final package layout:
+         *
+         *   OEBPS/
+         *     1/   <- first/input EPUB
+         *     2/   <- second/input EPUB
+         *     3/   <- third/input EPUB
+         *     ...
+         *
+         * The root OPF/NCX/nav remain package-level documents.
+         * Each volume keeps its original internal directory structure
+         * relative to its OPF directory.
+         */
+
+        const volumeInfos = [];
+
+        // Volume 1: move the base EPUB's content under 1/.
+        await this.moveVolumeContent(base, baseInfo, "1/");
+        volumeInfos.push({
+            info: baseInfo,
+            prefix: "1/",
+            nameMap: baseInfo.nameMap
+        });
+
+        // Volumes 2, 3, 4, ...: copy each source EPUB under its number.
         for (let i = 1; i < epubs.length; i++) {
             const srcZip = epubs[i];
             const srcInfo = await this.readEpubInfo(srcZip);
-            const prefix = "Merge_" + String(mergeIndex++).padStart(3, "0") + "/";
+            const prefix = String(i + 1) + "/";
+            const nameMap = await this.moveVolumeContent(
+                srcZip,
+                srcInfo,
+                prefix,
+                base
+            );
 
-            const nameMap = new Map();
+            volumeInfos.push({
+                info: srcInfo,
+                prefix,
+                nameMap
+            });
+        }
 
-            // Copy all content except EPUB container metadata and the source
-            // OPF/NCX/nav documents themselves.
-            for (const name of Object.keys(srcZip.files)) {
-                const entry = srcZip.files[name];
+        const baseOpfDir = this.dirname(baseInfo.opfName);
+        const baseManifest = baseInfo.opfDom.querySelector("manifest");
+        const baseSpine = baseInfo.opfDom.querySelector("spine");
 
-                if (entry.dir ||
-                    name === "mimetype" ||
-                    name === "META-INF/container.xml" ||
-                    name === srcInfo.opfName ||
-                    name === srcInfo.ncxName ||
-                    name === srcInfo.navName) {
-                    continue;
-                }
+        if (!baseManifest || !baseSpine) {
+            throw new Error("Invalid EPUB: OPF is missing manifest or spine.");
+        }
 
-                const newName = prefix + name;
-                nameMap.set(name, newName);
+        // Volume 1's manifest hrefs now point into 1/.
+        this.rewriteBaseManifest(baseInfo.opfDom, baseInfo);
 
-                const data = await entry.async("uint8array");
-                base.file(newName, data, this.zipOptions(entry));
-            }
-
-            const srcOpfDir = this.dirname(srcInfo.opfName);
-            const baseOpfDir = this.dirname(baseInfo.opfName);
-
-            // Copy manifest entries and give them unique IDs.
+        // Add manifest and spine entries for volumes 2+.
+        for (let i = 1; i < volumeInfos.length; i++) {
+            const { info, nameMap } = volumeInfos[i];
             const idMap = new Map();
-            const baseManifest = baseInfo.opfDom.querySelector("manifest");
 
-            for (const item of Array.from(srcInfo.opfDom.querySelectorAll("manifest > item"))) {
+            for (const item of Array.from(
+                info.opfDom.querySelectorAll("manifest > item")
+            )) {
                 const oldId = item.getAttribute("id");
                 const href = item.getAttribute("href");
 
@@ -66,21 +91,21 @@ class EpubMerger {
                     continue;
                 }
 
-                const sourcePath = this.resolvePath(srcOpfDir, href);
+                const sourcePath = this.resolvePath(
+                    this.dirname(info.opfName),
+                    href
+                );
                 const mappedPath = nameMap.get(sourcePath);
 
                 if (!mappedPath) {
                     continue;
                 }
 
-                let newId = oldId;
-                let suffix = 1;
-
-                while (Array.from(baseManifest.querySelectorAll("item")).some(
-                    x => x.getAttribute("id") === newId
-                )) {
-                    newId = oldId + "_m" + i + "_" + suffix++;
-                }
+                const newId = this.uniqueManifestId(
+                    oldId,
+                    i + 1,
+                    baseManifest
+                );
 
                 idMap.set(oldId, newId);
 
@@ -95,7 +120,10 @@ class EpubMerger {
                     } else if (attr.name === "href") {
                         newItem.setAttribute(
                             "href",
-                            this.relativePath(baseOpfDir, mappedPath)
+                            this.relativePath(
+                                baseOpfDir,
+                                mappedPath
+                            )
                         );
                     } else {
                         newItem.setAttribute(attr.name, attr.value);
@@ -105,11 +133,8 @@ class EpubMerger {
                 baseManifest.appendChild(newItem);
             }
 
-            // Append spine entries.
-            const baseSpine = baseInfo.opfDom.querySelector("spine");
-
             for (const ref of Array.from(
-                srcInfo.opfDom.querySelectorAll("spine > itemref")
+                info.opfDom.querySelectorAll("spine > itemref")
             )) {
                 const oldId = ref.getAttribute("idref");
                 const newId = idMap.get(oldId);
@@ -133,56 +158,74 @@ class EpubMerger {
 
                 baseSpine.appendChild(newRef);
             }
+        }
 
-            // EPUB 2 NCX.
-            if (baseInfo.ncxDom && srcInfo.ncxDom) {
-                const baseNavMap = baseInfo.ncxDom.querySelector("navMap");
-                const srcNavMap = srcInfo.ncxDom.querySelector("navMap");
+        // EPUB 2 NCX.
+        if (baseInfo.ncxDom && baseInfo.ncxName) {
+            const baseNavMap = baseInfo.ncxDom.querySelector("navMap");
 
-                if (baseNavMap && srcNavMap) {
-                    let playOrder = this.maxPlayOrder(baseNavMap) + 1;
+            if (baseNavMap) {
+                const navVolumes = [];
 
-                    for (const navPoint of Array.from(srcNavMap.children)) {
-                        if (navPoint.localName !== "navPoint") {
-                            continue;
-                        }
-
-                        const clone = navPoint.cloneNode(true);
-                        this.rewriteNcxNode(
-                            clone,
-                            srcInfo.ncxName,
-                            baseInfo.ncxName,
-                            nameMap
-                        );
-
-                        for (const point of [
-                            clone,
-                            ...Array.from(clone.querySelectorAll("navPoint"))
-                        ]) {
-                            if (point.hasAttribute("playOrder")) {
-                                point.setAttribute("playOrder", String(playOrder++));
-                            }
-                        }
-
-                        baseNavMap.appendChild(
-                            baseInfo.ncxDom.importNode(clone, true)
-                        );
+                for (const volume of volumeInfos) {
+                    if (!volume.info.ncxDom) {
+                        continue;
                     }
+
+                    const srcNavMap =
+                        volume.info.ncxDom.querySelector("navMap");
+
+                    if (!srcNavMap) {
+                        continue;
+                    }
+
+                    navVolumes.push({
+                        volume,
+                        srcNavMap
+                    });
                 }
+
+                this.mergeNcxNavMaps(
+                    baseInfo.ncxDom,
+                    baseInfo.ncxName,
+                    navVolumes
+                );
             }
+        }
 
-            // EPUB 3 / WebToEpub XHTML navigation.
-            if (baseInfo.navDom && srcInfo.navDom) {
-                const baseToc = this.findTocNav(baseInfo.navDom);
-                const srcToc = this.findTocNav(srcInfo.navDom);
+        // EPUB 3 / WebToEpub XHTML navigation.
+        if (baseInfo.navDom && baseInfo.navName) {
+            const baseToc = this.findTocNav(baseInfo.navDom);
 
-                if (baseToc && srcToc) {
+            if (baseToc) {
+                // Rewrite Volume 1's existing navigation into 1/.
+                this.rewriteHrefAttributes(
+                    baseToc,
+                    baseInfo.navName,
+                    baseInfo.navName,
+                    baseInfo.nameMap
+                );
+
+                // Append Volumes 2+.
+                for (let i = 1; i < volumeInfos.length; i++) {
+                    const { info, nameMap } = volumeInfos[i];
+
+                    if (!info.navDom) {
+                        continue;
+                    }
+
+                    const srcToc = this.findTocNav(info.navDom);
+
+                    if (!srcToc) {
+                        continue;
+                    }
+
                     for (const child of Array.from(srcToc.children)) {
                         const clone = child.cloneNode(true);
 
                         this.rewriteHrefAttributes(
                             clone,
-                            srcInfo.navName,
+                            info.navName,
                             baseInfo.navName,
                             nameMap
                         );
@@ -194,6 +237,12 @@ class EpubMerger {
                 }
             }
         }
+
+        // Rewrite EPUB 2 guide/reference hrefs, if present.
+        this.rewriteOpfReferences(
+            baseInfo.opfDom,
+            baseInfo
+        );
 
         // Save modified structural files.
         base.file(
@@ -229,6 +278,356 @@ class EpubMerger {
                 baseInfo.opfDom.querySelectorAll("spine > itemref").length,
             appendedCount: epubs.length - 1
         };
+    }
+
+    static async moveVolumeContent(zip, info, prefix, destinationZip) {
+        const sourceRoot = this.dirname(info.opfName);
+        const nameMap = new Map();
+
+        for (const name of Object.keys(zip.files)) {
+            const entry = zip.files[name];
+
+            if (
+                entry.dir ||
+                name === "mimetype" ||
+                name === "META-INF/container.xml" ||
+                name === info.opfName ||
+                name === info.ncxName ||
+                name === info.navName
+            ) {
+                continue;
+            }
+
+            const relative = this.relativeFromRoot(sourceRoot, name);
+
+            // EPUB content should be under the OPF directory. Files outside
+            // that directory are left alone rather than producing unsafe
+            // paths such as 1/../...
+            if (relative === null) {
+                continue;
+            }
+
+            const newName = prefix + relative;
+            nameMap.set(name, newName);
+
+            const data = await entry.async("uint8array");
+
+            if (destinationZip) {
+                destinationZip.file(
+                    newName,
+                    data,
+                    this.zipOptions(entry)
+                );
+            } else {
+                zip.file(newName, data, this.zipOptions(entry));
+
+                if (newName !== name) {
+                    zip.remove(name);
+                }
+            }
+        }
+
+        info.nameMap = nameMap;
+        return nameMap;
+    }
+
+    static relativeFromRoot(root, target) {
+        const normalizedRoot = root ? root + "/" : "";
+
+        if (normalizedRoot && target.startsWith(normalizedRoot)) {
+            return target.substring(normalizedRoot.length);
+        }
+
+        if (!root) {
+            return target;
+        }
+
+        return null;
+    }
+
+    static rewriteBaseManifest(opfDom, info) {
+        const manifest = opfDom.querySelector("manifest");
+
+        if (!manifest) {
+            return;
+        }
+
+        const nameMap = info.nameMap || new Map();
+
+        for (const item of Array.from(manifest.querySelectorAll("item"))) {
+            const href = item.getAttribute("href");
+
+            if (!href) {
+                continue;
+            }
+
+            const hash = href.indexOf("#");
+            const path = hash >= 0
+                ? href.substring(0, hash)
+                : href;
+            const fragment = hash >= 0
+                ? href.substring(hash)
+                : "";
+
+            const sourcePath = this.resolvePath(
+                this.dirname(info.opfName),
+                path
+            );
+
+            const mappedPath = nameMap.get(sourcePath);
+
+            if (mappedPath) {
+                item.setAttribute(
+                    "href",
+                    this.relativePath(
+                        this.dirname(info.opfName),
+                        mappedPath
+                    ) + fragment
+                );
+            }
+        }
+    }
+
+    static uniqueManifestId(oldId, volumeNumber, manifest) {
+        let newId = oldId;
+        let suffix = 1;
+
+        const exists = id =>
+            Array.from(manifest.querySelectorAll("item")).some(
+                item => item.getAttribute("id") === id
+            );
+
+        if (!exists(newId)) {
+            return newId;
+        }
+
+        do {
+            newId =
+                oldId +
+                "_v" +
+                volumeNumber +
+                "_" +
+                suffix++;
+        } while (exists(newId));
+
+        return newId;
+    }
+
+    static mergeNcxNavMaps(ncxDom, baseNcxName, navVolumes) {
+        const navMap = ncxDom.querySelector("navMap");
+
+        if (!navMap) {
+            return;
+        }
+
+        // Rewrite Volume 1's existing navigation into 1/.
+        const firstVolume = navVolumes.find(
+            entry => entry.volume.prefix === "1/"
+        );
+
+        if (firstVolume) {
+            this.rewriteNcxVolumeEntries(
+                navMap,
+                firstVolume.volume,
+                baseNcxName
+            );
+        }
+
+        // Append Volumes 2+.
+        for (const entry of navVolumes) {
+            if (entry.volume.prefix === "1/") {
+                continue;
+            }
+
+            const { volume, srcNavMap } = entry;
+
+            for (const navPoint of Array.from(srcNavMap.children)) {
+                if (navPoint.localName !== "navPoint") {
+                    continue;
+                }
+
+                const clone = navPoint.cloneNode(true);
+
+                this.rewriteNcxVolumeEntries(
+                    clone,
+                    volume,
+                    baseNcxName
+                );
+
+                navMap.appendChild(
+                    ncxDom.importNode(clone, true)
+                );
+            }
+        }
+
+        // EPUB 2 requires entries that refer to the same target to use
+        // the same playOrder. Normalize the complete merged navMap after
+        // all volume paths have been rewritten.
+        this.normalizeNcxPlayOrders(navMap);
+        this.makeNcxIdsUnique(navMap);
+    }
+
+    static rewriteNcxVolumeEntries(node, volume, baseNcxName) {
+        for (const content of Array.from(
+            node.querySelectorAll("content")
+        )) {
+            const src = content.getAttribute("src");
+
+            if (!src) {
+                continue;
+            }
+
+            const hash = src.indexOf("#");
+            const path = hash >= 0
+                ? src.substring(0, hash)
+                : src;
+            const fragment = hash >= 0
+                ? src.substring(hash)
+                : "";
+
+            const sourcePath = this.resolvePath(
+                this.dirname(volume.info.ncxName),
+                path
+            );
+
+            const mappedPath = volume.nameMap.get(sourcePath);
+
+            if (mappedPath) {
+                content.setAttribute(
+                    "src",
+                    this.relativePath(
+                        this.dirname(baseNcxName),
+                        mappedPath
+                    ) + fragment
+                );
+            }
+        }
+    }
+
+    static normalizeNcxPlayOrders(navMap) {
+        const targetOrders = new Map();
+        let nextOrder = 1;
+
+        const points = Array.from(
+            navMap.querySelectorAll(
+                "navPoint, navTarget, pageTarget"
+            )
+        );
+
+        for (const point of points) {
+            if (!point.hasAttribute("playOrder")) {
+                continue;
+            }
+
+            const content = point.querySelector(":scope > content");
+            const src = content
+                ? content.getAttribute("src")
+                : null;
+
+            if (!src) {
+                point.setAttribute(
+                    "playOrder",
+                    String(nextOrder++)
+                );
+                continue;
+            }
+
+            const target = this.normalizeNcxTarget(src);
+
+            if (!targetOrders.has(target)) {
+                targetOrders.set(target, nextOrder++);
+            }
+
+            point.setAttribute(
+                "playOrder",
+                String(targetOrders.get(target))
+            );
+        }
+    }
+
+    static normalizeNcxTarget(src) {
+        const hash = src.indexOf("#");
+        const path = hash >= 0
+            ? src.substring(0, hash)
+            : src;
+        const fragment = hash >= 0
+            ? src.substring(hash)
+            : "";
+
+        return this.resolvePath("", path) + fragment;
+    }
+
+    static makeNcxIdsUnique(navMap) {
+        const used = new Set();
+
+        const points = [
+            ...Array.from(navMap.querySelectorAll("navPoint")),
+            ...Array.from(navMap.querySelectorAll("navTarget")),
+            ...Array.from(navMap.querySelectorAll("pageTarget"))
+        ];
+
+        for (const point of points) {
+            const id = point.getAttribute("id");
+
+            if (!id) {
+                continue;
+            }
+
+            let candidate = id;
+            let suffix = 1;
+
+            while (used.has(candidate)) {
+                candidate = id + "_m" + suffix++;
+            }
+
+            used.add(candidate);
+            point.setAttribute("id", candidate);
+        }
+    }
+
+    static rewriteOpfReferences(opfDom, info) {
+        const guide = opfDom.querySelector("guide");
+
+        if (!guide) {
+            return;
+        }
+
+        const nameMap = info.nameMap || new Map();
+
+        for (const reference of Array.from(
+            guide.querySelectorAll("reference")
+        )) {
+            const href = reference.getAttribute("href");
+
+            if (!href) {
+                continue;
+            }
+
+            const hash = href.indexOf("#");
+            const path = hash >= 0
+                ? href.substring(0, hash)
+                : href;
+            const fragment = hash >= 0
+                ? href.substring(hash)
+                : "";
+
+            const sourcePath = this.resolvePath(
+                this.dirname(info.opfName),
+                path
+            );
+
+            const mapped = nameMap.get(sourcePath);
+
+            if (mapped) {
+                reference.setAttribute(
+                    "href",
+                    this.relativePath(
+                        this.dirname(info.opfName),
+                        mapped
+                    ) + fragment
+                );
+            }
+        }
     }
 
     static async readEpubInfo(zip) {
