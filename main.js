@@ -75,6 +75,57 @@ class Main {
         document.getElementById("controls").hidden = false;
     }
 
+    mergeSelectedEpubs() {
+        const input = document.getElementById("mergeEpubFiles");
+        const files = Array.from(input.files || []);
+
+        if (files.length < 2) {
+            window.alert(
+                "Select at least two EPUB files. " +
+                "The first selected EPUB is the base; " +
+                "the rest are appended."
+            );
+            return;
+        }
+
+        const button = document.getElementById("mergeEpubButton");
+        button.disabled = true;
+        document.getElementById("listHeader").textContent =
+            "Merging EPUBs...";
+
+        return EpubMerger.merge(files)
+            .then(result => {
+                const baseName =
+                    files[0].name.replace(/\.epub$/i, "");
+
+                const url = URL.createObjectURL(result.blob);
+                const a = document.createElement("a");
+
+                a.href = url;
+                a.download = baseName + "_merged.epub";
+                a.click();
+
+                setTimeout(
+                    () => URL.revokeObjectURL(url),
+                    60000
+                );
+
+                document.getElementById("listHeader").textContent =
+                    "Merged " + files.length +
+                    " EPUBs (" + result.chapterCount +
+                    " spine entries).";
+            })
+            .catch(e =>
+                window.alert(
+                    "Failed to merge EPUBs: " + e
+                )
+            )
+            .finally(() => {
+                button.disabled = false;
+            });
+    }
+
+
     checkForInvalidXhtml() {
         let that = this;
         this.epub.checkForInvalidXhtml().then(function (invalid) {
@@ -254,6 +305,7 @@ class Main {
         document.getElementById("linkExtraFontsButton").onclick = this.linkExtraFonts.bind(this);
         document.getElementById("updateDateButton").onclick = this.updateDate.bind(this);
         document.getElementById("updateTocTitlesFromHeadingButton").onclick = this.updateTocTitlesFromHeading.bind(this);
+        document.getElementById("mergeEpubButton").onclick = this.mergeSelectedEpubs.bind(this);
         document.getElementById("runScriptButton").onclick = this.runScript.bind(this);
         document.getElementById("runScriptAsyncButton").onclick = this.runScriptAsync.bind(this);
 

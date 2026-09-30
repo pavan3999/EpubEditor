@@ -57,6 +57,14 @@ return changed;
             <td><button id="runScriptButton">Run script above to modify Epub</button></td>
         </tr>
         <tr>
+            <td>Merge EPUBs</td>
+            <td>
+                <input id="mergeEpubFiles" type="file"
+                       accept=".epub,application/epub+zip" multiple>
+                <button id="mergeEpubButton">Merge Selected EPUBs</button>
+            </td>
+        </tr>
+        <tr>
             <td></td>
             <td><button id="runScriptAsyncButton">Run async script</button></td>
         </tr>
@@ -144,6 +152,7 @@ return changed;
     <script src="wawoff2_decompress_binding.js"></script>
     <script src="https://opentype.js.org/dist/opentype.js"></script>
     <script src="Epub.js"></script>
+    <script src="MergeEpub.js"></script>
     <script src="Sanitize.js"></script>
     <script src="main.js"></script>
 </body>
