@@ -9,7 +9,7 @@
 "use strict";
 
 class EpubMerger {
-    static async merge(files) {
+    static async merge(files, metadata = null) {
         if (!files || files.length < 2) {
             throw new Error("Select at least two EPUB files.");
         }
@@ -238,16 +238,33 @@ class EpubMerger {
             }
         }
 
+
+        // Apply optional final metadata to the merged package.
+        if (metadata && (
+            String(metadata.title ?? "").trim() ||
+            String(metadata.author ?? "").trim() ||
+            String(metadata.subject ?? "").trim() ||
+            String(metadata.description ?? "").trim()
+        )) {
+            this.applyMetadata(baseInfo.opfDom, metadata, true);
+        }
+
         // Rewrite EPUB 2 guide/reference hrefs, if present.
         this.rewriteOpfReferences(
             baseInfo.opfDom,
             baseInfo
         );
 
-        // Save modified structural files.
+        // Save modified structural files. Preserve the base EPUB's original
+        // XML declaration and <package ...> opening byte-for-byte.
+        let finalOpfText = this.serializeXml(baseInfo.opfDom);
+        finalOpfText = this.restoreOriginalOpfHeader(
+            finalOpfText,
+            baseInfo.opfSource
+        );
         base.file(
             baseInfo.opfName,
-            this.serializeXml(baseInfo.opfDom),
+            finalOpfText,
             this.zipOptions(base.file(baseInfo.opfName))
         );
 
@@ -278,6 +295,87 @@ class EpubMerger {
                 baseInfo.opfDom.querySelectorAll("spine > itemref").length,
             appendedCount: epubs.length - 1
         };
+    }
+
+
+    static applyMetadata(opfDom, metadata, preserveBlank = false) {
+        const metadataEl = opfDom.querySelector("metadata");
+        if (!metadataEl) {
+            throw new Error("EPUB OPF has no metadata element.");
+        }
+
+        const dcNs = "http://purl.org/dc/elements/1.1/";
+        const getValue = key => String(metadata?.[key] ?? "");
+
+        const titleValue = getValue("title").trim();
+        const authorValue = getValue("author");
+        const subjectValue = getValue("subject");
+        const descriptionValue = getValue("description");
+
+        let titleEl = metadataEl.querySelector("dc\\:title");
+        if (!titleEl) {
+            titleEl = opfDom.createElementNS(dcNs, "dc:title");
+            metadataEl.insertBefore(titleEl, metadataEl.firstChild);
+        }
+        if (!preserveBlank || titleValue) {
+            titleEl.textContent = titleValue;
+        }
+
+        if (!preserveBlank || authorValue.trim()) {
+            const existingCreators = Array.from(metadataEl.querySelectorAll("dc\\:creator"));
+            const authorValues = authorValue
+                .split(",")
+                .map(s => s.trim())
+                .filter(Boolean);
+            for (const el of existingCreators) {
+                el.remove();
+            }
+            for (let i = 0; i < authorValues.length; i++) {
+                const el = opfDom.createElementNS(dcNs, "dc:creator");
+                const old = existingCreators[i];
+                if (old) {
+                    for (const attr of Array.from(old.attributes || [])) {
+                        el.setAttributeNS(attr.namespaceURI, attr.name, attr.value);
+                    }
+                }
+                el.textContent = authorValues[i];
+                metadataEl.appendChild(el);
+            }
+        }
+
+        if (!preserveBlank || subjectValue.trim()) {
+            for (const el of Array.from(metadataEl.querySelectorAll("dc\\:subject"))) {
+                el.remove();
+            }
+            for (const subject of subjectValue.split(",").map(s => s.trim()).filter(Boolean)) {
+                const el = opfDom.createElementNS(dcNs, "dc:subject");
+                el.textContent = subject;
+                metadataEl.appendChild(el);
+            }
+        }
+
+        if (!preserveBlank || descriptionValue.trim()) {
+            let descriptionEl = metadataEl.querySelector("dc\\:description");
+            if (!descriptionEl) {
+                descriptionEl = opfDom.createElementNS(dcNs, "dc:description");
+                const creator = metadataEl.querySelector("dc\\:creator");
+                if (creator) metadataEl.insertBefore(descriptionEl, creator);
+                else metadataEl.appendChild(descriptionEl);
+            }
+
+            if (descriptionValue.trim()) {
+                const parts = descriptionValue
+                    .split(/\n\s*\n/)
+                    .map(p => p.trim())
+                    .filter(Boolean);
+
+                descriptionEl.textContent = parts
+                    .map(p => `<p>${p.replace(/\n/g, "<br/>")}</p>`)
+                    .join("\n");
+            } else {
+                descriptionEl.textContent = "";
+            }
+        }
     }
 
     static async moveVolumeContent(zip, info, prefix, destinationZip) {
@@ -519,7 +617,8 @@ class EpubMerger {
                 continue;
             }
 
-            const content = point.querySelector(":scope > content");
+            const content = Array.from(point.children || [])
+                .find(child => String(child.localName || child.tagName).toLowerCase() === "content");
             const src = content
                 ? content.getAttribute("src")
                 : null;
@@ -639,7 +738,12 @@ class EpubMerger {
         }
 
         const opfName = rootfile.getAttribute("full-path");
-        const opfDom = await this.readXml(zip, opfName);
+        const opfFile = zip.file(opfName);
+        if (!opfFile) {
+            throw new Error("EPUB is missing: " + opfName);
+        }
+        const opfSource = await opfFile.async("text");
+        const opfDom = new DOMParser().parseFromString(opfSource, "text/html");
         const manifest = opfDom.querySelector("manifest");
 
         if (!manifest) {
@@ -680,6 +784,7 @@ class EpubMerger {
 
         return {
             opfName,
+            opfSource,
             opfDom,
             ncxName,
             ncxDom,
@@ -698,11 +803,15 @@ class EpubMerger {
         const text = await file.async("text");
         const dom = new DOMParser().parseFromString(
             text,
-            "application/xml"
+            /\.opf$/i.test(name) ? "text/html" : "application/xml"
         );
 
-        if (dom.querySelector("parsererror")) {
+        if (dom.querySelector("parsererror") || !dom.documentElement) {
             throw new Error("Invalid XML in EPUB: " + name);
+        }
+
+        if (/\.opf$/i.test(name) && !dom.querySelector("package")) {
+            throw new Error("Invalid EPUB OPF package: " + name);
         }
 
         return dom;
@@ -874,7 +983,79 @@ class EpubMerger {
         return "../".repeat(from.length) + to.join("/");
     }
 
+    static restoreOriginalOpfHeader(serialized, original) {
+        if (!original) return serialized;
+
+        const originalMatch = String(original).match(/^[\s\S]*?<package\b[^>]*>/i);
+        const serializedMatch = String(serialized).match(/^[\s\S]*?<package\b[^>]*>/i);
+
+        if (!originalMatch || !serializedMatch) {
+            return serialized;
+        }
+
+        return originalMatch[0] + String(serialized).slice(serializedMatch[0].length);
+    }
+
     static serializeXml(dom) {
-        return new XMLSerializer().serializeToString(dom);
+        let node = dom;
+        const isHtmlWrapper = dom && dom.documentElement &&
+            String(dom.documentElement.localName).toLowerCase() === "html";
+
+        if (isHtmlWrapper) {
+            node = dom.querySelector("package") || dom;
+        }
+
+        let text = new XMLSerializer().serializeToString(node);
+
+        if (node && String(node.localName).toLowerCase() === "package") {
+            // HTML parsing preserves the source OPF namespace attribute while
+            // assigning the XHTML namespace to the <package> element itself.
+            // Normalize the serialized root to one OPF default namespace.
+            text = text.replace(
+                /^<!--\?xml\s+version=['\"]1\.0['\"](?:\s+encoding=['\"][^'\"]+['\"])?\?-->/i,
+                '<?xml version="1.0" encoding="UTF-8"?>'
+            );
+            text = text.replace(
+                /<package\b([^>]*)>/i,
+                (match, attrs) => {
+                    attrs = attrs.replace(
+                        /\s+xmlns\s*=\s*(['\"])[^'\"]*\1/gi,
+                        ''
+                    );
+                    return '<package xmlns="http://www.idpf.org/2007/opf"' + attrs + '>';
+                }
+            );
+        }
+
+
+        // Normalize OPF 2 empty-element containers. Some source EPUBs use
+        // HTML-style <item>/<itemref> start tags; XML requires these entries
+        // to be empty elements inside manifest/spine.
+        text = text.replace(
+            /<manifest\b([^>]*)>([\s\S]*?)<\/manifest>/i,
+            (match, attrs, inner) => {
+                const items = [];
+                inner.replace(/<item\b([^>]*)\/?>(?:<\/item>)?/gi, (m, itemAttrs) => {
+                    itemAttrs = itemAttrs.replace(/\s*\/$/, '');
+                    items.push('    <item' + itemAttrs + '/>');
+                    return m;
+                });
+                return '<manifest' + attrs + '>\n' + items.join('\n') + '\n  </manifest>';
+            }
+        );
+
+        text = text.replace(
+            /<spine\b([^>]*)>([\s\S]*?)<\/spine>/i,
+            (match, attrs, inner) => {
+                const refs = [];
+                inner.replace(/<itemref\b([^>]*)\/?>(?:<\/itemref>)?/gi, (m, refAttrs) => {
+                    refAttrs = refAttrs.replace(/\s*\/$/, '');
+                    refs.push('    <itemref' + refAttrs + '/>');
+                    return m;
+                });
+                return '<spine' + attrs + '>\n' + refs.join('\n') + '\n  </spine>';
+            }
+        );
+        return text;
     }
 }

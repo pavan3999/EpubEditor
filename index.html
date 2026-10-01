@@ -120,7 +120,31 @@ return changed;
                     <div id="mergeEmptyMessage" class="merge-empty-message">
                         Select EPUB files to build the merge order.
                     </div>
-                    <div class="merge-epub-actions">
+
+                    <div class="merge-epub-metadata">
+                        <strong>Final EPUB Metadata (optional)</strong>
+                        <div>
+                            <label for="mergeMetadataTitleInput">Title:</label>
+                            <input id="mergeMetadataTitleInput" type="text" size="60"
+                                   placeholder="Blank = keep BASE title">
+                        </div>
+                        <div>
+                            <label for="mergeMetadataAuthorInput">Author:</label>
+                            <input id="mergeMetadataAuthorInput" type="text" size="60"
+                                   placeholder="Blank = keep BASE author; comma-separated for multiple authors">
+                        </div>
+                        <div>
+                            <label for="mergeMetadataSubjectInput">Subject:</label>
+                            <input id="mergeMetadataSubjectInput" type="text" size="60"
+                                   placeholder="Fantasy, Cultivation, Action">
+                        </div>
+                        <div>
+                            <label for="mergeMetadataDescriptionInput">Description:</label><br>
+                            <textarea id="mergeMetadataDescriptionInput" rows="8" cols="70"
+                                      placeholder="Blank = keep BASE description"></textarea>
+                        </div>
+                    </div>
+<div class="merge-epub-actions">
                         <button id="mergeEpubButton" type="button" disabled>
                             Merge Selected EPUBs
                         </button>
@@ -197,6 +221,35 @@ return changed;
             <td></td>
             <td><button id="linkExtraFontsButton">Link extra fonts (ChrysanthemumGarden, requiemtls etc.)</button></td>
         </tr>
+
+        <tr>
+            <td>EPUB Metadata</td>
+            <td>
+                <div>
+                    <label for="metadataTitleInput">Title:</label>
+                    <input id="metadataTitleInput" type="text" size="60">
+                </div>
+                <div>
+                    <label for="metadataAuthorInput">Author:</label>
+                    <input id="metadataAuthorInput" type="text" size="60"
+                           placeholder="Comma-separated for multiple authors">
+                </div>
+                <div>
+                    <label for="metadataSubjectInput">Subject:</label>
+                    <input id="metadataSubjectInput" type="text" size="60"
+                           placeholder="Fantasy, Cultivation, Action">
+                </div>
+                <div>
+                    <label for="metadataDescriptionInput">Description:</label><br>
+                    <textarea id="metadataDescriptionInput" rows="8" cols="70"
+                              placeholder="Blank line = new paragraph; single newline = &lt;br/&gt;"></textarea>
+                </div>
+                <button id="updateMetadataButton" type="button">
+                    Update EPUB Metadata
+                </button>
+            </td>
+        </tr>
+
         <tr>
             <td></td>
             <td><button id="updateDateButton">Update Date</button><input id="updateDateInput" type="text" value="2026-03-10"></td>

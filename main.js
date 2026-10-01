@@ -72,7 +72,44 @@ class Main {
     }
 
     onEpubLoaded() {
+        if (this.epub?.getMetadata && document.getElementById("metadataTitleInput")) {
+            this.populateMetadataForm(this.epub.getMetadata(), "metadata");
+        }
+
         document.getElementById("controls").hidden = false;
+    }
+
+
+
+    getMetadataFormValues(prefix = "metadata") {
+        return {
+            title: document.getElementById(prefix + "TitleInput")?.value ?? "",
+            author: document.getElementById(prefix + "AuthorInput")?.value ?? "",
+            subject: document.getElementById(prefix + "SubjectInput")?.value ?? "",
+            description: document.getElementById(prefix + "DescriptionInput")?.value ?? ""
+        };
+    }
+
+    populateMetadataForm(metadata, prefix = "metadata") {
+        metadata = metadata || {};
+        const title = document.getElementById(prefix + "TitleInput");
+        const author = document.getElementById(prefix + "AuthorInput");
+        const subject = document.getElementById(prefix + "SubjectInput");
+        const description = document.getElementById(prefix + "DescriptionInput");
+        if (title) title.value = metadata.title || "";
+        if (author) author.value = metadata.author || "";
+        if (subject) subject.value = metadata.subject || "";
+        if (description) description.value = metadata.description || "";
+    }
+
+    updateMetadata() {
+        const metadata = this.getMetadataFormValues("metadata");
+        return this.epub.updateMetadata(
+            metadata.title,
+            metadata.author,
+            metadata.subject,
+            metadata.description
+        ).then(() => this.epub.save(this.fileName, "application/epub+zip"));
     }
 
 
@@ -92,7 +129,9 @@ class Main {
             status.textContent = "Merging " + files.length + " EPUBs...";
         }
 
-        return EpubMerger.merge(files)
+        const metadata = this.getMetadataFormValues("mergeMetadata");
+
+        return EpubMerger.merge(files, metadata)
             .then(result => {
                 const baseName =
                     files[0].name.replace(/\.epub$/i, "");
@@ -138,6 +177,7 @@ class Main {
 
     addMergeEpubFiles(fileList) {
         const incoming = Array.from(fileList || []);
+        const previousBase = this.mergeEpubFilesOrder[0] || null;
 
         for (const file of incoming) {
             if (!/\.epub$/i.test(file.name)) {
@@ -156,11 +196,39 @@ class Main {
         }
 
         this.renderMergeEpubOrder();
+
+        const newBase = this.mergeEpubFilesOrder[0] || null;
+        if (newBase && newBase !== previousBase) {
+            this.loadMergeBaseMetadata(newBase);
+        }
+    }
+
+    loadMergeBaseMetadata(file) {
+        if (!file) {
+            this.populateMetadataForm({}, "mergeMetadata");
+            return;
+        }
+
+        const epub = new Epub();
+        return epub.load(file)
+            .then(() => {
+                this.populateMetadataForm(epub.getMetadata(), "mergeMetadata");
+            })
+            .catch(error => {
+                console.warn("Could not read base EPUB metadata for merge:", error);
+                this.populateMetadataForm({}, "mergeMetadata");
+            });
     }
 
     removeMergeEpub(index) {
+        const previousBase = this.mergeEpubFilesOrder[0] || null;
         this.mergeEpubFilesOrder.splice(index, 1);
         this.renderMergeEpubOrder();
+
+        const newBase = this.mergeEpubFilesOrder[0] || null;
+        if (newBase !== previousBase) {
+            this.loadMergeBaseMetadata(newBase);
+        }
     }
 
     moveMergeEpub(index, direction) {
@@ -174,16 +242,23 @@ class Main {
         }
 
         const files = this.mergeEpubFilesOrder;
+        const previousBase = files[0] || null;
         const temp = files[index];
         files[index] = files[target];
         files[target] = temp;
 
         this.renderMergeEpubOrder();
+
+        const newBase = files[0] || null;
+        if (newBase !== previousBase) {
+            this.loadMergeBaseMetadata(newBase);
+        }
     }
 
     clearMergeEpubs() {
         this.mergeEpubFilesOrder = [];
         this.renderMergeEpubOrder();
+        this.populateMetadataForm({}, "mergeMetadata");
 
         const input = document.getElementById("mergeEpubFiles");
         if (input) {
@@ -247,8 +322,13 @@ class Main {
                     from < files.length
                 ) {
                     const moved = files.splice(from, 1)[0];
+                    const previousBase = files[0] || null;
                     files.splice(to, 0, moved);
                     this.renderMergeEpubOrder();
+                    const newBase = files[0] || null;
+                    if (newBase !== previousBase) {
+                        this.loadMergeBaseMetadata(newBase);
+                    }
                 }
             });
 
@@ -551,6 +631,7 @@ class Main {
         document.getElementById("appendSourceLinkInEachChapterButton").onclick = this.appendSourceLinkInEachChapter.bind(this);
         document.getElementById("linkExtraFontsButton").onclick = this.linkExtraFonts.bind(this);
         document.getElementById("updateDateButton").onclick = this.updateDate.bind(this);
+        document.getElementById("updateMetadataButton").onclick = this.updateMetadata.bind(this);
         document.getElementById("updateTocTitlesFromHeadingButton").onclick = this.updateTocTitlesFromHeading.bind(this);
         this.mergeEpubFilesOrder = [];
 

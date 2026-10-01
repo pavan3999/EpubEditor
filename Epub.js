@@ -234,22 +234,21 @@ class Epub {
 
     /** private */
     writeToDisk(filename, blob) {
-        let options = {
-            url: URL.createObjectURL(blob),
-            saveAs: true
-        };
-        let cleanup = () => { URL.revokeObjectURL(options.url); };
-        let clickEvent = new MouseEvent("click", {
-            "view": window,
-            "bubbles": true,
-            "cancelable": false
-        });
-        let a = document.createElement("a");
-        a.href = options.url;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
         a.download = filename;
-        a.dispatchEvent(clickEvent);
+        a.style.display = "none";
+        document.body.appendChild(a);
+
+        // Use the native click() on an attached anchor. This is more reliable
+        // on Android browsers than dispatching a synthetic MouseEvent on a
+        // detached anchor, especially after asynchronous EPUB generation.
+        a.click();
+        a.remove();
+
         const oneMinute = 60 * 1000;
-        setTimeout(cleanup, oneMinute);
+        setTimeout(() => URL.revokeObjectURL(url), oneMinute);
         return Promise.resolve();
     }
 
@@ -269,6 +268,10 @@ class Epub {
     parseOpf(opfName) {
         let that = this;
         return this.extractXhtnml(opfName).then(function (dom) {
+            const packageEl = dom.querySelector("package");
+            if (!packageEl) {
+                throw new Error("Invalid EPUB OPF package: " + opfName);
+            }
             that.opf = new Opf(dom, opfName);
         });
     }
@@ -1761,6 +1764,158 @@ class Epub {
         return updated;
     }
 
+    getMetadata() {
+        const metadata = this.opf.dom.querySelector("metadata");
+        if (!metadata) return { title: "", author: "", subject: "", description: "" };
+
+        const titleEl = metadata.querySelector("dc\\:title");
+        const creators = Array.from(metadata.querySelectorAll("dc\\:creator"))
+            .map(el => el.textContent.trim())
+            .filter(Boolean);
+        const subjects = Array.from(metadata.querySelectorAll("dc\\:subject"))
+            .map(el => el.textContent.trim())
+            .filter(Boolean);
+        const descriptionEl = metadata.querySelector("dc\\:description");
+
+        return {
+            title: titleEl ? titleEl.textContent.trim() : "",
+            author: creators.join(", "),
+            subject: subjects.join(", "),
+            description: descriptionEl
+                ? descriptionEl.textContent
+                    .replace(/<br\s*\/?>/gi, "\n")
+                    .replace(/<\/p>\s*<p>/gi, "\n\n")
+                    .replace(/<\/?p>/gi, "")
+                : ""
+        };
+    }
+
+    async updateMetadata(title, author, subject, description) {
+        const opfFile = this.zipObjects.get(this.opf.zipObjectName);
+        if (!opfFile) {
+            throw new Error("EPUB OPF file not found.");
+        }
+
+        // IMPORTANT: do not serialize the OPF DOM here. XMLSerializer changes
+        // the XML declaration, whitespace, empty-element syntax, namespace
+        // formatting, and other unrelated source formatting. Metadata editing
+        // must be a surgical edit of the original OPF text.
+        const original = await opfFile.async("text");
+        const metadataMatch = original.match(/<metadata\b[^>]*>[\s\S]*?<\/metadata\s*>/i);
+        if (!metadataMatch) {
+            throw new Error("EPUB OPF has no metadata element.");
+        }
+
+        let metadataText = metadataMatch[0];
+        const escapeXml = value => String(value ?? "")
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&apos;");
+
+        const uniqueValues = value => {
+            const seen = new Set();
+            return String(value ?? "")
+                .split(",")
+                .map(v => v.trim())
+                .filter(Boolean)
+                .filter(v => {
+                    const key = v.toLocaleLowerCase();
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+        };
+
+        const replaceDcGroup = (text, localName, values, makeElement) => {
+            // Match the dc element regardless of harmless whitespace/casing,
+            // while requiring the dc prefix used by the EPUB metadata.
+            const re = new RegExp(
+                `<dc:${localName}\\b[^>]*(?:\\/>|>[\\s\\S]*?<\\/dc:${localName}\\s*>)`,
+                "gi"
+            );
+            const matches = [...text.matchAll(re)];
+            const replacement = values.map(makeElement).join("\n");
+
+            if (matches.length) {
+                const first = matches[0];
+                const firstValue = replacement;
+                let out = "";
+                let cursor = 0;
+                matches.forEach((m, i) => {
+                    out += text.slice(cursor, m.index);
+                    if (i === 0) out += firstValue;
+                    cursor = m.index + m[0].length;
+                });
+                out += text.slice(cursor);
+                return out;
+            }
+
+            // No existing element: insert immediately before </metadata>,
+            // without touching any other source text.
+            const close = /<\/metadata\s*>/i;
+            return text.replace(close, replacement ? replacement + "\n$&" : "$&");
+        };
+
+        const titleValue = String(title ?? "").trim();
+        const authors = uniqueValues(author);
+        const subjects = uniqueValues(subject);
+        const rawDescription = String(description ?? "");
+
+        // Description uses the existing editor convention: blank lines become
+        // paragraphs and single newlines become <br/>. It is XML text, so the
+        // markup is escaped in the OPF rather than becoming child XHTML nodes.
+        let descriptionValue = "";
+        if (rawDescription.trim()) {
+            const parts = rawDescription
+                .split(/\n\s*\n/)
+                .map(p => p.trim())
+                .filter(Boolean);
+            descriptionValue = parts
+                .map(p => `<p>${p.replace(/\r?\n/g, "<br/>")}</p>`)
+                .join("\n");
+        }
+
+        metadataText = replaceDcGroup(
+            metadataText,
+            "title",
+            [titleValue],
+            v => `<dc:title>${escapeXml(v)}</dc:title>`
+        );
+        metadataText = replaceDcGroup(
+            metadataText,
+            "creator",
+            authors,
+            v => `<dc:creator>${escapeXml(v)}</dc:creator>`
+        );
+        metadataText = replaceDcGroup(
+            metadataText,
+            "subject",
+            subjects,
+            v => `<dc:subject>${escapeXml(v)}</dc:subject>`
+        );
+        metadataText = replaceDcGroup(
+            metadataText,
+            "description",
+            [descriptionValue],
+            v => `<dc:description>${escapeXml(v)}</dc:description>`
+        );
+
+        const updated =
+            original.slice(0, metadataMatch.index) +
+            metadataText +
+            original.slice(metadataMatch.index + metadataMatch[0].length);
+
+        this.zip.file(
+            this.opf.zipObjectName,
+            updated,
+            this.createZipOptions(opfFile)
+        );
+        this.zipObjects.set(this.opf.zipObjectName, this.zip.file(this.opf.zipObjectName));
+        return Promise.resolve();
+    }
+
     updateDate(dateString) {
         let dateEl = this.opf.dom.querySelector("dc\\:date:not([opf\\:event])");
         if (dateEl !== null) {
@@ -1852,7 +2007,14 @@ class Epub {
 
     replaceZipObject(zipObjectName, newDom, modified) {
         if (modified) {
-            let text = new XMLSerializer().serializeToString(newDom);
+            let node = newDom;
+            if (/\.opf$/i.test(zipObjectName)) {
+                node = newDom.querySelector("package");
+                if (!node) {
+                    throw new Error("Cannot serialize OPF: package element not found.");
+                }
+            }
+            let text = new XMLSerializer().serializeToString(node);
             text = this.patchHtmlConversion(text);
             let file = this.zipObjects.get(zipObjectName);
             let options = this.createZipOptions(file);
@@ -1861,8 +2023,60 @@ class Epub {
     }
 
     patchHtmlConversion(textToFix) {
-        return textToFix.replace("<!--?xml version=\"1.0\" encoding=\"utf-8\"?-->", 
-            "<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        let text = textToFix;
+
+        // DOMParser(..., "text/html") turns the OPF XML declaration into
+        // an HTML comment. Restore it for the serialized OPF.
+        text = text.replace(
+            /^<!--\?xml\s+version=['\"]1\.0['\"](?:\s+encoding=['\"][^'\"]+['\"])?\?-->/i,
+            '<?xml version="1.0" encoding="UTF-8"?>'
+        );
+
+        // The HTML parser gives <package> the XHTML namespace while also
+        // preserving the OPF xmlns attribute from the source. XMLSerializer
+        // can therefore emit two default xmlns attributes. Normalize the
+        // package root so it has exactly one OPF default namespace.
+        text = text.replace(
+            /<package\b([^>]*)>/i,
+            (match, attrs) => {
+                attrs = attrs.replace(
+                    /\s+xmlns\s*=\s*(['\"])[^'\"]*\1/gi,
+                    ''
+                );
+                return '<package xmlns="http://www.idpf.org/2007/opf"' + attrs + '>';
+            }
+        );
+
+
+        // Normalize OPF 2 empty-element containers. Some source EPUBs use
+        // HTML-style <item>/<itemref> start tags; XML requires these entries
+        // to be empty elements inside manifest/spine.
+        text = text.replace(
+            /<manifest\b([^>]*)>([\s\S]*?)<\/manifest>/i,
+            (match, attrs, inner) => {
+                const items = [];
+                inner.replace(/<item\b([^>]*)\/?>(?:<\/item>)?/gi, (m, itemAttrs) => {
+                    itemAttrs = itemAttrs.replace(/\s*\/$/, '');
+                    items.push('    <item' + itemAttrs + '/>');
+                    return m;
+                });
+                return '<manifest' + attrs + '>\n' + items.join('\n') + '\n  </manifest>';
+            }
+        );
+
+        text = text.replace(
+            /<spine\b([^>]*)>([\s\S]*?)<\/spine>/i,
+            (match, attrs, inner) => {
+                const refs = [];
+                inner.replace(/<itemref\b([^>]*)\/?>(?:<\/itemref>)?/gi, (m, refAttrs) => {
+                    refAttrs = refAttrs.replace(/\s*\/$/, '');
+                    refs.push('    <itemref' + refAttrs + '/>');
+                    return m;
+                });
+                return '<spine' + attrs + '>\n' + refs.join('\n') + '\n  </spine>';
+            }
+        );
+        return text;
     }
 
     removeItems(items) {
